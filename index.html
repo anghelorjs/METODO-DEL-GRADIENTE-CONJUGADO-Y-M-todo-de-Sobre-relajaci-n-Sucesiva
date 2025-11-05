@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Difusión de calor en una placa 2D — CG vs SOR</title>
+<style>
+  :root{
+    --bg-1:#060915; --bg-2:#0a1030;
+    --panel:#0b1335cc; --panel-border:#23357a;
+    --accent:#7df9ff; --accent2:#6dffb3; --accent3:#ff6bd6;
+    --text:#e9f3ff; --muted:#9bb3ffcc;
+    --shadow:0 0 30px rgba(109,255,179,.12), inset 0 0 30px rgba(125,249,255,.05);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    color:var(--text);
+    font:400 16px/1.5 Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+    background:
+      radial-gradient(1200px 800px at 20% -10%, #101a48 0%, transparent 60%),
+      radial-gradient(1000px 900px at 120% 10%, #141a3a 0%, transparent 65%),
+      linear-gradient(180deg, var(--bg-1), var(--bg-2));
+    overflow:hidden;
+  }
+  .grid-bg, .glow-bg{ position:fixed; inset:0; pointer-events:none; }
+  .grid-bg{
+    background-image:
+      linear-gradient(rgba(70,120,255,.12) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(70,120,255,.12) 1px, transparent 1px);
+    background-size: 48px 48px, 48px 48px;
+    transform: perspective(800px) rotateX(55deg) translateY(-18%);
+    filter: drop-shadow(0 0 6px rgba(125,249,255,.25));
+    animation:gridFloat 18s ease-in-out infinite alternate; opacity:.35;
+  }
+  @keyframes gridFloat{
+    0%{ transform: perspective(800px) rotateX(55deg) translateY(-18%) translateX(0) }
+    100%{ transform: perspective(800px) rotateX(55deg) translateY(-22%) translateX(-2%) }
+  }
+  .glow-bg{
+    background:
+      radial-gradient(600px 400px at 20% 15%, rgba(125,249,255,.18), transparent 60%),
+      radial-gradient(700px 450px at 80% 12%, rgba(109,255,179,.16), transparent 65%),
+      radial-gradient(900px 600px at 50% 110%, rgba(255,107,214,.10), transparent 60%);
+    mix-blend-mode: screen; animation:glowPulse 9s ease-in-out infinite alternate;
+  }
+  @keyframes glowPulse{ 0%{ filter: blur(0px) opacity(.9) } 100%{ filter: blur(1px) opacity(.95) } }
+
+  header{
+    position:fixed; left:24px; right:24px; top:16px;
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:12px 16px; background: linear-gradient(180deg, #0d1541cc, #0a1030aa);
+    border:1px solid var(--panel-border); border-radius:16px; box-shadow: var(--shadow);
+    backdrop-filter: blur(6px); z-index:12;
+  }
+  h1{
+    font-weight:800; letter-spacing:.3px; text-shadow:0 0 14px rgba(125,249,255,.35);
+    display:flex; align-items:center; gap:10px; font-size: clamp(16px, 2vw, 24px);
+  }
+  .logo-dot{ width:9px; height:9px; border-radius:50%; background:var(--accent2);
+    box-shadow:0 0 16px rgba(109,255,179,.9) inset, 0 0 14px rgba(109,255,179,.6) }
+  .tag{
+    font:700 12px/1 ui-monospace, Menlo, Consolas, monospace;
+    padding:6px 10px; border-radius:999px; border:1px solid #274b6b; color:#cdeeff;
+    background:linear-gradient(180deg, #0a2030, #071522);
+    box-shadow: inset 0 0 18px rgba(125,249,255,.07), 0 0 10px rgba(125,249,255,.12);
+  }
+
+  .wrap{
+    position:fixed; inset:0; display:grid;
+    grid-template-columns: min(420px, 42vw) 1fr; gap:18px;
+    padding:96px 24px 24px;
+  }
+  .panel{
+    background:linear-gradient(180deg, var(--panel), #0a1030cc);
+    border:1px solid var(--panel-border); border-radius:18px; box-shadow: var(--shadow);
+    backdrop-filter: blur(10px); overflow:hidden;
+  }
+  .panel h2{
+    font-size:16px; font-weight:800; padding:14px 16px;
+    border-bottom:1px solid #1c2e68; color:var(--accent); letter-spacing:.4px;
+  }
+  .panel .content{ padding:14px 16px 16px; }
+  .row{ display:grid; grid-template-columns: 1fr 130px; gap:10px; align-items:center; margin:10px 0;}
+  label{ font-size:13px; color:var(--muted) }
+  input[type=range]{ width:100%; accent-color: var(--accent); }
+  input[type=number], select{
+    width:100%; background:#0b1438; color:var(--text); border:1px solid #22376e;
+    border-radius:12px; padding:8px 10px; outline:none; box-shadow: inset 0 0 10px rgba(125,249,255,.08);
+  }
+  .btn{
+    width:100%; margin-top:10px; padding:12px 14px; border-radius:14px; border:1px solid #275f4a;
+    color:var(--text); cursor:pointer; font-weight:800; letter-spacing:.4px;
+    background:linear-gradient(180deg,#0f2a25,#0b221e); box-shadow:0 0 14px rgba(109,255,179,.18);
+    transition: transform .12s ease, box-shadow .2s ease, filter .2s ease;
+  }
+  .btn:hover{ transform: translateY(-1px); box-shadow:0 0 22px rgba(109,255,179,.28) }
+  .btn.alt{ border-color:#2b4f9a; background:linear-gradient(180deg,#0e1f4f,#0a1941); box-shadow:0 0 14px rgba(125,249,255,.18); }
+  .btn.ghost{ background:transparent; border-color:#23407d; }
+
+  .stats{
+    display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:10px;
+    font:600 12px/1.35 ui-monospace, Menlo, Consolas, monospace; color:#cfe2ff; opacity:.9;
+  }
+  .chip{ background:#081433; border:1px solid #274b6b; border-radius:12px; padding:10px;
+    box-shadow: inset 0 0 10px rgba(125,249,255,.08); }
+
+  canvas.scene{
+    width:100%; height:100%; display:block; border-radius:18px; border:1px solid #1a2a60; box-shadow: var(--shadow);
+    background: radial-gradient(900px 600px at 60% -10%, #0f1a55 0%, #070b22 60%), #070b22;
+  }
+  .plots{ display:grid; grid-template-columns:1fr; gap:10px; margin-top:10px }
+  canvas.mini{ width:100%; height:120px; border-radius:12px; border:1px solid #1a2a60; background:#08112f }
+
+  .drawer{
+    position:fixed; right:24px; top:76px; width:min(560px, 92vw);
+    background:linear-gradient(180deg, #0e1540ee, #091030ee);
+    border:1px solid #24408b; border-radius:16px; box-shadow: var(--shadow);
+    padding:14px 16px; transform: translateY(-16px); opacity:0; pointer-events:none;
+    transition: opacity .25s ease, transform .25s ease;
+    backdrop-filter: blur(8px); z-index:11;
+  }
+  .drawer.open{ opacity:1; transform: translateY(0); pointer-events:auto; }
+  .drawer h3{ margin:0 0 6px; color:var(--accent2); font-weight:800; }
+  .drawer p{ font-size:14px; color:#dfe9ff; opacity:.95; margin:6px 0; }
+  .drawer ul{ margin:8px 0 0 18px; color:#cfe3ff; font-size:14px; }
+  .badge{ display:inline-block; padding:2px 8px; border-radius:999px; border:1px solid #2c528c; background:#0a1b42; color:#cfe8ff; font:700 11px ui-monospace,Menlo,Consolas; }
+</style>
+</head>
+<body>
+<div class="glow-bg"></div>
+<div class="grid-bg"></div>
+
+<header>
+  <h1>
+    <span class="logo-dot"></span>
+    Difusión de calor en una placa 2D — <span style="color:var(--accent)">CG vs SOR</span>
+  </h1>
+  <div style="display:flex; gap:10px; align-items:center;">
+    <button id="helpBtn" class="btn ghost" style="width:auto;padding:8px 12px">¿Qué estoy viendo?</button>
+    <div class="tag">Esquema 5 puntos • JS puro</div>
+  </div>
+</header>
+
+<!-- Explicación -->
+<aside id="drawer" class="drawer" role="dialog" aria-live="polite">
+  <h3>¿Qué estás viendo?</h3>
+  <p>Resolvemos el problema en estado estacionario <b>−Δu=0</b> (sin fuentes) sobre una placa cuadrada. Los bordes (izq, der, sup, inf) tienen temperaturas fijas. El interior se discretiza en una malla de <b>n×n</b> nodos y se obtiene un sistema lineal esparso con el <i>esquema de 5 puntos</i>:</p>
+  <p style="font-family:ui-monospace,Menlo,Consolas; background:#0a163b; padding:8px 10px; border-radius:10px; border:1px solid #29428c">
+    4·u(i,j) − u(i−1,j) − u(i+1,j) − u(i,j−1) − u(i,j+1) = b(i,j)
+  </p>
+  <ul>
+    <li><b>CG</b> (Gradiente Conjugado): método óptimo para matrices <i>SPD</i> (como ésta). Avanza minimizando un funcional cuadrático. No requiere parámetro.</li>
+    <li><b>SOR</b> (Sobrerrelajación): variante de Gauss–Seidel con parámetro <b>ω</b> (entre 0 y 2). Un ω cercano al óptimo acelera mucho.</li>
+  </ul>
+  <p>Usa los controles para cambiar <span class="badge">n</span>, <span class="badge">bordes</span>, <span class="badge">tolerancia</span>, el <span class="badge">método</span> y <span class="badge">ω</span>. Presiona <b>Ejecutar</b> o <b>Comparar</b>. El panel muestra <b>iteraciones</b>, <b>residuo relativo</b> y <b>tiempo</b>. La curva “Residuo” se actualiza en vivo.</p>
+</aside>
+
+<div class="wrap">
+  <!-- Panel de control -->
+  <aside class="panel" aria-label="panel de control">
+    <h2>Controles</h2>
+    <div class="content">
+      <div class="row"><label for="n">Tamaño malla (n×n interior)</label><input id="n" type="number" min="8" max="80" step="1" value="28" /></div>
+      <div class="row"><label for="Tleft">Izquierda (°C)</label><input id="Tleft" type="number" value="100" /></div>
+      <div class="row"><label for="Tright">Derecha (°C)</label><input id="Tright" type="number" value="50" /></div>
+      <div class="row"><label for="Ttop">Arriba (°C)</label><input id="Ttop" type="number" value="0" /></div>
+      <div class="row"><label for="Tbottom">Abajo (°C)</label><input id="Tbottom" type="number" value="0" /></div>
+
+      <div class="row"><label for="method">Método</label>
+        <select id="method">
+          <option value="cg">Gradiente Conjugado (CG)</option>
+          <option value="sor">SOR</option>
+        </select>
+      </div>
+      <div class="row"><label for="omega">ω (SOR)</label><input id="omega" type="number" step="0.01" value="1.70" /></div>
+      <div class="row"><label for="tol">Tolerancia</label><input id="tol" type="number" step="1e-9" value="1e-8" /></div>
+
+      <button class="btn" id="suggest">Sugerir ω óptimo</button>
+      <button class="btn alt" id="run">Ejecutar</button>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px">
+        <button class="btn alt" id="compare">Comparar (CG vs SOR)</button>
+        <button class="btn ghost" id="pause">Pausar</button>
+      </div>
+
+      <div class="stats">
+        <div class="chip">Iteraciones: <span id="iters">0</span></div>
+        <div class="chip">Residuo: <span id="resid">—</span></div>
+      </div>
+      <div class="stats">
+        <div class="chip">Tiempo: <span id="time">0 ms</span></div>
+        <div class="chip">Variables: <span id="vars">—</span></div>
+      </div>
+
+      <div class="plots">
+        <div>
+          <label style="font-size:12px;color:#cfe2ff">Residuo relativo vs iteración</label>
+          <canvas id="resPlot" class="mini" width="480" height="160"></canvas>
+        </div>
+      </div>
+      <p style="font-size:12px;opacity:.85;margin-top:8px">Tip: para Poisson 2D, una heurística es <b>ω≈2/(1+sin(π/(n+1)))</b>.</p>
+    </div>
+  </aside>
+
+  <!-- Visualización -->
+  <main class="panel" aria-label="visualización">
+    <h2>Campo de temperatura (interior de la placa)</h2>
+    <canvas id="cv" class="scene"></canvas>
+  </main>
+</div>
+
+<script>
+/* =========== Utilidades y tamaño =========== */
+const TAU=Math.PI*2;
+const clamp=(x,a,b)=>x<a?a:(x>b?b:x);
+const canvas = document.getElementById('cv');
+const ctx = canvas.getContext('2d',{alpha:false});
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR=Math.min(2, window.devicePixelRatio||1);
+  W = canvas.clientWidth; H = canvas.clientHeight;
+  canvas.width = Math.floor(W*DPR); canvas.height = Math.floor(H*DPR);
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener('resize', resize);
+
+/* =========== Controles =========== */
+const ui = {
+  n: document.getElementById('n'),
+  Tleft: document.getElementById('Tleft'),
+  Tright: document.getElementById('Tright'),
+  Ttop: document.getElementById('Ttop'),
+  Tbottom: document.getElementById('Tbottom'),
+  method: document.getElementById('method'),
+  omega: document.getElementById('omega'),
+  tol: document.getElementById('tol'),
+  suggest: document.getElementById('suggest'),
+  run: document.getElementById('run'),
+  compare: document.getElementById('compare'),
+  pause: document.getElementById('pause'),
+  iters: document.getElementById('iters'),
+  resid: document.getElementById('resid'),
+  time: document.getElementById('time'),
+  vars: document.getElementById('vars'),
+  helpBtn: document.getElementById('helpBtn'),
+  drawer: document.getElementById('drawer'),
+  resPlot: document.getElementById('resPlot'),
+};
+ui.helpBtn.addEventListener('click', ()=> ui.drawer.classList.toggle('open'));
+
+/* =========== Problema: -Δu = 0 con Dirichlet =========== */
+/* Representación:
+   - Usamos vector x de tamaño N=n*n (nodos interiores).
+   - Operador A·x implementado con el stencil 5-puntos (sin matriz densa).
+   - b incluye contribuciones de bordes. */
+
+function buildProblem(n, Tleft, Tright, Ttop, Tbottom){
+  const N = n*n;
+  const b = new Float64Array(N);
+  const idx = (i,j)=> i*n + j; // i:0..n-1 (vertical), j:0..n-1 (horizontal)
+
+  // Construcción de b (bordes)
+  for(let i=0;i<n;i++){
+    for(let j=0;j<n;j++){
+      const k = idx(i,j);
+      let val = 0;
+      if(i===0)   val += Ttop;
+      if(i===n-1) val += Tbottom;
+      if(j===0)   val += Tleft;
+      if(j===n-1) val += Tright;
+      b[k] = val;
+    }
+  }
+
+  // A·x mediante stencil
+  function applyA(x, out){
+    // out = A*x
+    for(let i=0;i<n;i++){
+      for(let j=0;j<n;j++){
+        const k = idx(i,j);
+        let s = 4*x[k];
+        if(i>0)   s -= x[idx(i-1,j)];
+        if(i<n-1) s -= x[idx(i+1,j)];
+        if(j>0)   s -= x[idx(i,j-1)];
+        if(j<n-1) s -= x[idx(i,j+1)];
+        out[k] = s;
+      }
+    }
+  }
+
+  // Residuo r = b - A*x (si se pasa x)
+  function residual(x, out){
+    for(let i=0;i<n;i++){
+      for(let j=0;j<n;j++){
+        const k = idx(i,j);
+        let s = 4*x[k];
+        if(i>0)   s -= x[idx(i-1,j)];
+        else      s -= Ttop;
+        if(i<n-1) s -= x[idx(i+1,j)];
+        else      s -= Tbottom;
+        if(j>0)   s -= x[idx(i,j-1)];
+        else      s -= Tleft;
+        if(j<n-1) s -= x[idx(i,j+1)];
+        else      s -= Tright;
+        out[k] = -s; // porque ecuación es 4u - sumVecinos = 0 ⇒ residuo = b - A x = (bordes) - (4u - sumInt)
+      }
+    }
+  }
+
+  return {N, b, applyA, residual, idx, n};
+}
+
+/* =========== CG =========== */
+async function solveCG(problem, tol=1e-8, progressCb=null, pausedRef=null){
+  const {N, applyA, residual} = problem;
+  const x = new Float64Array(N); // inicial en cero
+  const r = new Float64Array(N);
+  const p = new Float64Array(N);
+  const Ap= new Float64Array(N);
+
+  residual(x, r); // r = b - A x  (ya incluye bordes)
+  p.set(r);
+  let rsold = dot(r,r);
+  const bnorm = Math.sqrt(rsold) || 1;
+
+  let it=0;
+  while(true){
+    if(pausedRef && pausedRef.paused) await sleep(30);
+    applyA(p, Ap);
+    const alpha = rsold / dot(p,Ap);
+    axpy(x, alpha, p);        // x += alpha p
+    axpy(r, -alpha, Ap);      // r -= alpha A p
+    const rsnew = dot(r,r);
+    const rel = Math.sqrt(rsnew)/bnorm;
+    it++;
+    progressCb && progressCb(it, rel);
+    if(rel < tol || it > 5*N) break;
+    const beta = rsnew / rsold;
+    for(let i=0;i<N;i++) p[i] = r[i] + beta*p[i];
+    rsold = rsnew;
+    // rendición al navegador
+    if(it%50===0) await sleep(0);
+  }
+  return {x, it};
+}
+
+/* =========== SOR in-place en 2D =========== */
+/* trabajamos directamente con u[i,j], sin formar A */
+async function solveSOR(problem, omega=1.7, tol=1e-8, progressCb=null, pausedRef=null){
+  const {n, idx} = problem;
+  const u = new Float64Array(n*n); // inicial en cero
+
+  const bnorm = Math.sqrt(dotSORResidual(problem, u, u)); // ||b|| equivalente
+  let it=0, rel=Infinity;
+
+  while(true){
+    if(pausedRef && pausedRef.paused) await sleep(30);
+    // Barrido Gauss-Seidel con SOR
+    for(let i=0;i<n;i++){
+      for(let j=0;j<n;j++){
+        const k = idx(i,j);
+        // b_i = contrib de bordes:
+        let b = 0;
+        if(i===0)   b += + getT("top");
+        if(i===n-1) b += + getT("bottom");
+        if(j===0)   b += + getT("left");
+        if(j===n-1) b += + getT("right");
+        // suma vecinos con los valores más recientes (GS)
+        let s = 0;
+        if(i>0)   s += u[idx(i-1,j)]; else s += getT("top");
+        if(i<n-1) s += u[idx(i+1,j)]; else s += getT("bottom");
+        if(j>0)   s += u[idx(i,j-1)]; else s += getT("left");
+        if(j<n-1) s += u[idx(i,j+1)]; else s += getT("right");
+        const gs = (b + s)/4; // Gauss-Seidel puro (A diag = 4)
+        u[k] = (1-omega)*u[k] + omega*gs;
+      }
+    }
+    // residuo relativo
+    const rr = dotSORResidual(problem, u, u); // ≈ ||b-Au||^2
+    rel = Math.sqrt(rr)/(bnorm||1);
+    it++;
+    progressCb && progressCb(it, rel);
+    if(rel < tol || it > 20000) break;
+    if(it%50===0) await sleep(0);
+  }
+  return {x: u, it};
+}
+
+/* Aux residuo para SOR (calc ||b-Au||^2) */
+function dotSORResidual(prob, u){
+  const {n, idx} = prob;
+  let sum=0;
+  for(let i=0;i<n;i++){
+    for(let j=0;j<n;j++){
+      const k=idx(i,j);
+      let Au = 4*u[k]
+        - (i>0   ? u[idx(i-1,j)] : getT("top"))
+        - (i<n-1 ? u[idx(i+1,j)] : getT("bottom"))
+        - (j>0   ? u[idx(i,j-1)] : getT("left"))
+        - (j<n-1 ? u[idx(i,j+1)] : getT("right"));
+      // ecuación es A u = b  con b = contrib de bordes a la izquierda:
+      // Aquí b = (top if i=0) + ... + (right if j=n-1)
+      let b=0;
+      if(i===0)   b += getT("top");
+      if(i===n-1) b += getT("bottom");
+      if(j===0)   b += getT("left");
+      if(j===n-1) b += getT("right");
+      const r = b - Au;
+      sum += r*r;
+    }
+  }
+  return sum;
+}
+
+/* =========== Álgebra =========== */
+function dot(a,b){ let s=0; for(let i=0;i<a.length;i++) s += a[i]*b[i]; return s; }
+function axpy(y,a,x){ for(let i=0;i<y.length;i++) y[i] += a*x[i]; }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+/* =========== Visualización heatmap =========== */
+function paletteNeon(t){
+  // t∈[0,1] -> mezcla neón (azul->cian->magenta)
+  const r = Math.round(255*Math.max(0, Math.min(1, 2*(t-0.3))));
+  const g = Math.round(255*Math.max(0, Math.min(1, 2*(0.7-Math.abs(t-0.5)))));
+  const b = Math.round(255*Math.max(0, 1-2*Math.max(0,t-0.5)));
+  return {r,g,b};
+}
+function drawField(u, n, Tmin, Tmax){
+  const w = canvas.width / DPR, h = canvas.height / DPR;
+  const cw = w / n, ch = h / n;
+  ctx.clearRect(0,0,w,h);
+  for(let i=0;i<n;i++){
+    for(let j=0;j<n;j++){
+      const val = u[i*n + j];
+      const t = (val - Tmin) / (Tmax - Tmin + 1e-9);
+      const c = paletteNeon(clamp(t,0,1));
+      ctx.fillStyle = `rgb(${c.r},${c.g},${c.b})`;
+      ctx.fillRect(j*cw, i*ch, cw+1, ch+1);
+    }
+  }
+}
+
+/* =========== Curva de residuo =========== */
+const rctx = ui.resPlot.getContext('2d');
+function drawResidPlot(hist){
+  const W = ui.resPlot.width, H = ui.resPlot.height;
+  rctx.setTransform(1,0,0,1,0,0);
+  rctx.clearRect(0,0,W,H);
+  // fondo
+  rctx.fillStyle = '#0a163b';
+  rctx.fillRect(0,0,W,H);
+  // ejes
+  rctx.strokeStyle = 'rgba(154,215,255,.6)';
+  rctx.lineWidth = 1;
+  rctx.beginPath();
+  rctx.moveTo(30,10); rctx.lineTo(30,H-20); rctx.lineTo(W-10,H-20);
+  rctx.stroke();
+  if(hist.length===0) return;
+  const maxX = Math.max(1, hist.length-1);
+  const minY = Math.min(...hist), maxY = Math.max(...hist);
+  const y0 = (v)=> {
+    const t = (Math.log10(v) - Math.log10(minY||1e-12)) / (Math.log10(maxY||1e-12) - Math.log10(minY||1e-12) + 1e-9);
+    return clamp(H-20 - t*(H-40), 10, H-20);
+  };
+  rctx.strokeStyle = '#6dffb3';
+  rctx.lineWidth = 2;
+  rctx.beginPath();
+  for(let i=0;i<hist.length;i++){
+    const x = 30 + (i/maxX)*(W-40);
+    const y = y0(hist[i]);
+    if(i===0) rctx.moveTo(x,y); else rctx.lineTo(x,y);
+  }
+  rctx.stroke();
+}
+
+/* =========== Estado y acciones =========== */
+let paused = false;
+ui.pause.addEventListener('click', ()=>{
+  paused = !paused;
+  ui.pause.textContent = paused ? 'Continuar' : 'Pausar';
+});
+
+function getT(side){
+  if(side==='left') return +ui.Tleft.value;
+  if(side==='right') return +ui.Tright.value;
+  if(side==='top') return +ui.Ttop.value;
+  if(side==='bottom') return +ui.Tbottom.value;
+  return 0;
+}
+
+ui.suggest.addEventListener('click', ()=>{
+  const n = +ui.n.value;
+  const h = 1/(n+1);
+  const w = 2/(1+Math.sin(Math.PI*h));
+  ui.omega.value = w.toFixed(3);
+});
+
+ui.run.addEventListener('click', runOnce);
+ui.compare.addEventListener('click', compareBoth);
+ui.vars.textContent = '—';
+
+async function runOnce(){
+  resize();
+  const n = +ui.n.value;
+  const N = n*n;
+  ui.vars.textContent = N.toString();
+  const prob = buildProblem(n, getT('left'), getT('right'), getT('top'), getT('bottom'));
+  const tol = +ui.tol.value;
+  const method = ui.method.value;
+  const omega = +ui.omega.value;
+
+  const hist = [];
+  const t0 = performance.now();
+  let res;
+  if(method==='cg'){
+    res = await solveCG(prob, tol, (it,rel)=>{ hist.push(rel); drawResidPlot(hist); ui.iters.textContent=it; ui.resid.textContent=rel.toExponential(2); }, {paused:()=>paused, get paused(){return paused}});
+  }else{
+    res = await solveSOR(prob, omega, tol, (it,rel)=>{ hist.push(rel); drawResidPlot(hist); ui.iters.textContent=it; ui.resid.textContent=rel.toExponential(2); }, {paused:()=>paused, get paused(){return paused}});
+  }
+  const dt = performance.now()-t0;
+  ui.time.textContent = `${dt.toFixed(1)} ms`;
+
+  // dibujar campo
+  const u = res.x;
+  let Tmin = Math.min(getT('left'), getT('right'), getT('top'), getT('bottom')), Tmax = Math.max(getT('left'), getT('right'), getT('top'), getT('bottom'));
+  for(let k=0;k<u.length;k++){ if(u[k]<Tmin) Tmin=u[k]; if(u[k]>Tmax) Tmax=u[k]; }
+  drawField(u, n, Tmin, Tmax);
+}
+
+async function compareBoth(){
+  resize();
+  const n = +ui.n.value; const tol=+ui.tol.value; const omega=+ui.omega.value;
+  const probA = buildProblem(n, getT('left'), getT('right'), getT('top'), getT('bottom'));
+  const probB = buildProblem(n, getT('left'), getT('right'), getT('top'), getT('bottom'));
+
+  // CG
+  const hCG=[]; const t0a=performance.now();
+  const rCG = await solveCG(probA, tol, (it,rel)=>{ if(it%5===0){ hCG.push(rel); drawResidPlot(hCG);} }, {get paused(){return paused}});
+  const ta = performance.now()-t0a;
+
+  // SOR
+  const hSOR=[]; const t0b=performance.now();
+  const rSOR = await solveSOR(probB, omega, tol, (it,rel)=>{ if(it%5===0){ hSOR.push(rel); drawResidPlot(hSOR);} }, {get paused(){return paused}});
+  const tb = performance.now()-t0b;
+
+  // Mostrar el mejor (más rápido) en el canvas
+  const show = (ta<=tb) ? rCG : rSOR;
+  const u = show.x;
+  let Tmin = Math.min(getT('left'), getT('right'), getT('top'), getT('bottom')), Tmax = Math.max(getT('left'), getT('right'), getT('top'), getT('bottom'));
+  for(let k=0;k<u.length;k++){ if(u[k]<Tmin) Tmin=u[k]; if(u[k]>Tmax) Tmax=u[k]; }
+  drawField(u, n, Tmin, Tmax);
+
+  // Resumen en métricas (formato corto)
+  const summary = `CG: ${rCG.it} iters, ${ta.toFixed(1)} ms  |  SOR(ω=${omega}): ${rSOR.it} iters, ${tb.toFixed(1)} ms`;
+  ui.iters.textContent = `${rCG.it} / ${rSOR.it}`;
+  ui.resid.textContent = '—';
+  ui.time.textContent = summary;
+  ui.vars.textContent = (n*n).toString();
+}
+
+/* =========== Arranque =========== */
+(function boot(){
+  resize();
+  ui.vars.textContent = (+ui.n.value)*(+ui.n.value);
+  drawResidPlot([]);
+  // primera corrida rápida para ver algo:
+  runOnce();
+})();
+</script>
+</body>
+</html>
